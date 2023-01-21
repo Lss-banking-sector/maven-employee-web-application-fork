@@ -1,0 +1,98 @@
+pipeline{
+    agent any
+    
+    tools {
+  maven 'maven.3.8.6'
+}
+
+/*triggers {
+  pollSCM '* * * * *'
+}*/
+options {
+  timestamps()
+  buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '5', daysToKeepStr: '', numToKeepStr: '5')
+}
+
+triggers {
+  cron '* * * * *'
+}
+
+    
+    stages{
+        stage('checkoutcode'){
+        steps{
+        sendslacknotifications('STARTED')
+          git credentialsId: 'a3cc0927-12e4-4932-8f53-fb3e92fe4e8b', url: 'https://github.com/lokeshsgithub/maven-employee-web-application.git'
+            }
+            
+            
+        }
+        
+        stage('Build'){
+            steps{
+                sh "mvn clean package"
+            }
+        }
+        
+        stage('Executing the sonarqube report'){
+            steps{
+                sh "mvn clean sonar:sonar"
+            }
+        }
+        stage('uploading the artifacts into nexus'){
+            steps{
+                sh "mvn clean deploy"
+            }
+        }
+        
+        stage('Deploy the APP into tomcat server'){
+            steps{
+                sshagent(['2c74ba4a-83de-4dc1-b42c-298d45d10dbf']) {
+                    sh "scp -o strictHostkeychecking=no target/employee-application.war ec2-user@172.31.32.229:/opt/apache-tomcat-9.0.70/webapps"
+                }
+            }
+        }
+        
+        
+    }//stage closed
+    
+   post {
+  always {
+    sendslacknotifications(currentBuild.result)
+  }
+  success {
+    sendslacknotifications(currentBuild.result) 
+  }
+  failure {
+     sendslacknotifications(currentBuild.result)
+  }
+}
+
+    
+}//pipeline closed
+//slack notification function
+def sendslacknotifications(String buildStatus = 'STARTED') {
+  // build status of null means successful
+  buildStatus =  buildStatus ?: 'SUCCESS'
+
+  // Default values
+  def colorName = 'RED'
+  def colorCode = '#FF0000'
+  def subject = "${buildStatus}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'"
+  def summary = "${subject} (${env.BUILD_URL})"
+
+  // Override default values based on build status
+  if (buildStatus == 'STARTED') {
+    colorName = 'YELLOW'
+    colorCode = '#FFFF00'
+  } else if (buildStatus == 'SUCCESS') {
+    colorName = 'GREEN'
+    colorCode = '#00FF00'
+  } else {
+    colorName = 'RED'
+    colorCode = '#FF0000'
+  }
+
+  // Send notifications
+  slackSend (color: colorCode, message: summary,channel:'#citibank-projects' )
+}
